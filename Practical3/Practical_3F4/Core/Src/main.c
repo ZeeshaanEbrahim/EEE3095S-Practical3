@@ -28,12 +28,18 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+// Task 4 Constraint: MAX_ITER must be 100
 #define MAX_ITER 100
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+// --- Defines for Task 4 ---
+// Set your target image size here. Start with smaller values (e.g., 640x480) and increase.
+#define IMG_WIDTH 1920
+#define IMG_HEIGHT 1080
+// The number of rows to process in each chunk.
+#define TILE_HEIGHT 10
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -47,17 +53,16 @@ volatile uint64_t globalCheckSum = 0;
 volatile uint32_t globalStartTime = 0;
 volatile uint32_t globalEndTime = 0;
 volatile uint32_t executionTime = 0;
-// New variables for Task 3 metrics
 volatile uint64_t globalClockCycles = 0;
 volatile uint32_t throughput_pixels_per_sec = 0;
-static const int image_dimensions[] = {128, 160, 192, 224, 256};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
-uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations);
+// Modified for Task 4 to calculate a "chunk" of the image
+uint64_t calculate_mandelbrot_chunk(int full_width, int full_height, int max_iterations, int y_start, int y_end);
 uint64_t calculate_mandelbrot_double(int width, int height, int max_iterations);
 /* USER CODE END PFP */
 
@@ -81,49 +86,60 @@ int main(void)
   SystemClock_Config();
   MX_GPIO_Init();
 
+  // Initialize DWT Cycle Counter
+  CoreDebug_DEMCR |= TRCENA_Msk;
+  DWT_CYCCNT = 0;
+  DWT_CTRL |= CYCEN_Msk;
+
+  // --- Task 4: Tiled Mandelbrot Calculation ---
+
+  // Accumulators for the total calculation
+  uint64_t total_checksum = 0;
+  uint64_t total_execution_time_ms = 0;
+  uint64_t total_clock_cycles = 0;
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET); // Set pin high for entire calculation
+
+  // Loop through the image in horizontal tiles
+  for (int y_start = 0; y_start < IMG_HEIGHT; y_start += TILE_HEIGHT) {
+      int y_end = y_start + TILE_HEIGHT;
+      if (y_end > IMG_HEIGHT) {
+          y_end = IMG_HEIGHT;
+      }
+
+      // Time each chunk individually
+      globalStartTime = HAL_GetTick();
+      uint32_t start_cycles = DWT_CYCCNT;
+
+      uint64_t chunk_checksum = calculate_mandelbrot_chunk(IMG_WIDTH, IMG_HEIGHT, MAX_ITER, y_start, y_end);
+
+      uint32_t end_cycles = DWT_CYCCNT;
+      globalEndTime = HAL_GetTick();
+
+      // Accumulate results from the chunk
+      total_checksum += chunk_checksum;
+      total_execution_time_ms += (globalEndTime - globalStartTime);
+      total_clock_cycles += (end_cycles - start_cycles);
+  }
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET); // Set pin low after completion
+
+  // Final results stored in global variables for debugging
+  globalCheckSum = total_checksum;
+  executionTime = total_execution_time_ms;
+  globalClockCycles = total_clock_cycles;
+
+  if (executionTime > 0) {
+      uint64_t total_pixels = (uint64_t)IMG_WIDTH * IMG_HEIGHT;
+      throughput_pixels_per_sec = (uint32_t)((total_pixels * 1000) / executionTime);
+  } else {
+      throughput_pixels_per_sec = 0;
+  }
+
+  /* Infinite loop */
   while (1)
   {
-    for (int i = 0; i < (sizeof(image_dimensions)/sizeof(image_dimensions[0])); i++)
-    {
-    	int dim = image_dimensions[i];
 
-		// --- Measurement Start ---
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-		globalStartTime = HAL_GetTick();
-
-		uint32_t start_cycles = DWT_CYCCNT; // Capture start cycle count
-		globalCheckSum = calculate_mandelbrot_fixed_point_arithmetic(dim, dim, MAX_ITER);
-		uint32_t end_cycles = DWT_CYCCNT;   // Capture end cycle count
-
-		globalEndTime = HAL_GetTick();
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-		// --- Measurement End ---
-
-
-		// --- Calculations (performed outside of the timed section) ---
-		executionTime = globalEndTime - globalStartTime;
-		globalClockCycles = end_cycles - start_cycles;
-
-		if (executionTime > 0) {
-			uint64_t total_pixels = (uint64_t)dim * dim;
-			throughput_pixels_per_sec = (uint32_t)((total_pixels * 1000) / executionTime);
-		} else {
-			throughput_pixels_per_sec = 0;
-		}
-
-		HAL_Delay(500); // Your original delay is unchanged
-
-//        // Double-precision test
-//        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
-//        globalStartTime = HAL_GetTick();
-//        globalCheckSum = calculate_mandelbrot_double(dim, dim, MAX_ITER);
-//        globalEndTime = HAL_GetTick();
-//        executionTime = globalEndTime - globalStartTime;
-//        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
-//        HAL_Delay(500);
-//
-//        HAL_Delay(1000);
-    }
   }
 }
 
@@ -135,10 +151,8 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
-
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -152,14 +166,12 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
-
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
   {
     Error_Handler();
@@ -174,14 +186,11 @@ void SystemClock_Config(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
                           |GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7, GPIO_PIN_RESET);
-
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
                           |GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -191,7 +200,9 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations)
+// This function now calculates a horizontal "chunk" of the Mandelbrot set,
+// from row y_start to y_end. The width and height parameters refer to the FULL image.
+uint64_t calculate_mandelbrot_chunk(int full_width, int full_height, int max_iterations, int y_start, int y_end)
 {
     uint64_t sum = 0;
     int FRACT = 29;
@@ -203,14 +214,17 @@ uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int 
     long long y_min = -(1LL * scale_factor);
     long long y_range = (2LL * scale_factor);
 
-    long long step_x = x_range / width;
-    long long step_y = y_range / height;
+    long long step_x = x_range / full_width;
+    long long step_y = y_range / full_height;
 
-    for (int y = 0; y < height; y++)
+    // Calculate the starting y-coordinate for this specific chunk
+    long long y0 = y_min + (long long)y_start * step_y;
+
+    // Loop only over the rows assigned to this chunk
+    for (int y = y_start; y < y_end; y++)
     {
-        long long y0 = y_min + (long long)y * step_y;
         long long x0 = x_min;
-        for (int x = 0; x < width; x++)
+        for (int x = 0; x < full_width; x++)
         {
             long long xi = 0, yi = 0;
             int iter = 0;
@@ -229,6 +243,7 @@ uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int 
             sum += (uint64_t)iter;
             x0 += step_x;
         }
+        y0 += step_y; // Move to the next line for the next iteration
     }
     return sum;
 }

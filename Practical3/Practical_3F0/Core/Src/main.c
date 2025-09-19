@@ -33,7 +33,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define BITS 16
+#define FP_UNITY (1 << BITS)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -60,6 +61,44 @@ uint64_t calculate_mandelbrot_double(int width, int height, int max_iterations);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/**
+ * @brief  Performs an optimized 32x32->64 bit multiplication.
+ * @note   This is faster than a standard C (int64_t) cast on a Cortex-M0
+ * because it uses hardware-friendly 16x16 bit multiplications.
+ * @param  x: The first 32-bit signed integer.
+ * @param  y: The second 32-bit signed integer.
+ * @retval The 64-bit signed result of x * y.
+ */
+static inline int64_t multiply_32x32_to_64(int32_t x, int32_t y) {
+    // Break down each 32-bit number into 16-bit high and low parts
+    int16_t x_high = x >> 16;
+    uint16_t x_low = x & 0xFFFF;
+    int16_t y_high = y >> 16;
+    uint16_t y_low = y & 0xFFFF;
+
+    // Perform the four 16x16 bit multiplications
+    int32_t prod_hh = (int32_t)x_high * y_high;
+    int32_t prod_hl = (int32_t)x_high * y_low;
+    int32_t prod_lh = (int32_t)x_low * y_high;
+    uint32_t prod_ll = (uint32_t)x_low * y_low;
+
+    // Combine the partial products to get the full 64-bit result
+    int64_t cross_products = (int64_t)prod_hl + (int64_t)prod_lh;
+    int64_t result = ((int64_t)prod_hh << 32) + ((int64_t)cross_products << 16) + prod_ll;
+
+    return result;
+}
+// Helper functions for fixed-point arithmetic
+static inline int32_t qmul(int32_t x, int32_t y) {
+    // Use the optimized helper function for the multiplication
+    int64_t product = multiply_32x32_to_64(x, y);
+    // Add rounding factor and shift as before
+    return (int32_t)((product + (1LL << (BITS - 1))) >> BITS);
+}
+static inline int32_t qmul2(int32_t x, int32_t y) {
+    int64_t product = multiply_32x32_to_64(x, y);
+    return (int32_t)((product + (1LL << (BITS - 2))) >> (BITS - 1));
+}
 /* USER CODE END 0 */
 
 /**
@@ -104,24 +143,24 @@ int main(void)
         int dim = image_dimensions[i];
 
         // Fixed-point test
-//        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-//        globalStartTime = HAL_GetTick();
-//        globalCheckSum = calculate_mandelbrot_fixed_point_arithmetic(dim, dim, MAX_ITER);
-//        globalEndTime = HAL_GetTick();
-//        executionTime = globalEndTime - globalStartTime;
-//        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-//        HAL_Delay(500); // Small delay for visual cue
-
-        // Double-precision test
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
         globalStartTime = HAL_GetTick();
-        globalCheckSum = calculate_mandelbrot_double(dim, dim, MAX_ITER);
+        globalCheckSum = calculate_mandelbrot_fixed_point_arithmetic(dim, dim, MAX_ITER);
         globalEndTime = HAL_GetTick();
         executionTime = globalEndTime - globalStartTime;
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
         HAL_Delay(500); // Small delay for visual cue
 
-        HAL_Delay(1000); // Pause for 1s between test runs
+        // Double-precision test
+//        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+//        globalStartTime = HAL_GetTick();
+//        globalCheckSum = calculate_mandelbrot_double(dim, dim, MAX_ITER);
+//        globalEndTime = HAL_GetTick();
+//        executionTime = globalEndTime - globalStartTime;
+//        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+//        HAL_Delay(500); // Small delay for visual cue
+//
+//        HAL_Delay(1000); // Pause for 1s between test runs
     }
     /* USER CODE END 3 */
   }
@@ -137,37 +176,36 @@ void SystemClock_Config(void)
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
+  /* 1) Enable HSI and configure PLL (HSI 8MHz * 6 = 48MHz) */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+
+  /* Configure PLL: use HSI as PLL source and MUL6 */
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;      // HSI used
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL6;              // 8MHz * 6 = 48MHz
+
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
-                              | RCC_CLOCKTYPE_PCLK1;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  /* 2) Configure Flash latency: 48 MHz needs 1 wait state on F0 */
+  __HAL_FLASH_SET_LATENCY(FLASH_LATENCY_1);
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  /* 3) Select PLL as system clock source and configure bus dividers */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_PCLK1;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;  // Use PLL
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;         // HCLK = SYSCLK
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;          // PCLK1 = HCLK
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
   {
     Error_Handler();
   }
 }
 
-/**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -193,48 +231,38 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations)
-{
-    uint64_t sum = 0;
 
-    // Scaling factor (for basic fixed-point)
-    int FRACT = 24;
-    long long scale_factor = (1LL << FRACT);
-    long long FOUR = (4LL << FRACT);
+uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations) {
+    uint64_t mandelbrot_sum = 0;
 
-    // Ranges in fixed-point
-    long long x_min = -((5LL * scale_factor) >> 1);
-    long long x_range = (7LL * scale_factor) >> 1;
-    long long y_min = -(1LL * scale_factor);
-    long long y_range = (2LL * scale_factor);
+    const int32_t x_left = -((5 * FP_UNITY) / 2); // -2.5 in BIT16
+    const int32_t y_top = -FP_UNITY;              // -1.0 in BIT16
 
-    // Step sizes
-    long long step_x = x_range / width;
-    long long step_y = y_range / height;
+    const int32_t x_step = (int32_t)(((int64_t)7 * FP_UNITY + (2 * width) / 2) / (2 * width));
+    const int32_t y_step = (int32_t)(((int64_t)2 * FP_UNITY + height / 2) / height);
+    const int32_t FOUR = 4 * FP_UNITY;
 
-    for (int y = 0; y < height; y++) {
-        long long y0 = y_min + (long long)y * step_y;
-        long long x0 = x_min;
-        for (int x = 0; x < width; x++) {
-            long long xi = 0, yi = 0;
-            int iter = 0;
-
-            while (iter < max_iterations) {
-                long long xi2 = (xi * xi) >> FRACT;
-                long long yi2 = (yi * yi) >> FRACT;
-
-                if ((xi2 + yi2) > FOUR) break;
-
-                long long temp = xi2 - yi2 + x0;
-                yi = ((2LL * xi * yi) >> FRACT) + y0;
+    int32_t y0 = y_top;
+    for (int y = 0; y < height; ++y) {
+        int32_t x0 = x_left;
+        for (int x = 0; x < width; ++x) {
+            int32_t xi = 0, yi = 0;
+            int i = 0;
+            while (i < max_iterations) {
+                int32_t xi2 = qmul(xi, xi);
+                int32_t yi2 = qmul(yi, yi);
+                if (xi2 + yi2 > FOUR) break;
+                int32_t temp = xi2 - yi2 + x0;
+                yi = qmul2(xi, yi) + y0;
                 xi = temp;
-                iter++;
+                ++i;
             }
-            sum += (uint64_t)iter;
-            x0 += step_x;
+            mandelbrot_sum += i;
+            x0 += x_step;
         }
+        y0 += y_step;
     }
-    return sum;
+    return mandelbrot_sum;
 }
 
 uint64_t calculate_mandelbrot_double(int width, int height, int max_iterations)

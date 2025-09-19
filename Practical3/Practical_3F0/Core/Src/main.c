@@ -56,8 +56,16 @@ volatile uint64_t globalCheckSum = 0;
 volatile uint32_t globalStartTime = 0;
 volatile uint32_t globalEndTime = 0;
 volatile uint32_t executionTime = 0;
+<<<<<<< HEAD
 volatile uint64_t globalClockCycles = 0;
 volatile uint32_t throughput_pixels_per_sec = 0;
+=======
+// New variables for Task 3
+volatile uint64_t globalClockCycles = 0;
+volatile uint32_t throughput_pixels_per_sec = 0;
+
+static const int image_dimensions[] = {128, 160, 192, 224, 256};
+>>>>>>> f0cfe7ba70e591ae34cdc4b4eb15f0c797b1e533
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -163,6 +171,53 @@ int main(void)
     // You can inspect the global variables in the debugger.
 
     /* USER CODE BEGIN 3 */
+<<<<<<< HEAD
+=======
+    for (int i = 0; i < (sizeof(image_dimensions) / sizeof(image_dimensions[0])); i++) {
+        int dim = image_dimensions[i];
+
+        globalStartTime = HAL_GetTick();
+        uint32_t start_systick_val = SysTick->VAL;
+        // Fixed-point test
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+        globalCheckSum = calculate_mandelbrot_fixed_point_arithmetic(dim, dim, MAX_ITER);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+        // Capture end time (wall-clock and cycles)
+        uint32_t end_systick_val = SysTick->VAL;
+        globalEndTime = HAL_GetTick();
+        executionTime = globalEndTime - globalStartTime;
+
+        // 2. CPU Clock Cycles
+		uint32_t ticks_elapsed = executionTime;
+		// The SysTick->LOAD register holds the number of cycles per tick minus 1.
+		// For a 48MHz clock and 1ms tick, LOAD is 47999, so there are 48000 cycles per tick.
+		uint32_t cycles_per_tick = SysTick->LOAD + 1;
+		// Since SysTick is a down-counter, start_systick_val will be greater than end_systick_val
+		globalClockCycles = (uint64_t)ticks_elapsed * cycles_per_tick + (start_systick_val - end_systick_val);
+
+		// 3. Throughput (pixels per second)
+		if (executionTime > 0) {
+			uint64_t total_pixels = (uint64_t)dim * dim;
+			// Formula: throughput = (total_pixels * 1000) / executionTime_ms
+			throughput_pixels_per_sec = (uint32_t)((total_pixels * 1000) / executionTime);
+		} else {
+			throughput_pixels_per_sec = 0; // Avoid division by zero
+		}
+
+        HAL_Delay(1000); // Small delay for visual cue
+
+        // Double-precision test
+//        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+//        globalStartTime = HAL_GetTick();
+//        globalCheckSum = calculate_mandelbrot_double(dim, dim, MAX_ITER);
+//        globalEndTime = HAL_GetTick();
+//        executionTime = globalEndTime - globalStartTime;
+//        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+//        HAL_Delay(500); // Small delay for visual cue
+//
+//        HAL_Delay(1000); // Pause for 1s between test runs
+    }
+>>>>>>> f0cfe7ba70e591ae34cdc4b4eb15f0c797b1e533
     /* USER CODE END 3 */
   }
 }

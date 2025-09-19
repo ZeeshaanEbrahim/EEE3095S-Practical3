@@ -81,7 +81,7 @@ int main(void)
         // Fixed-point test
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
         globalStartTime = HAL_GetTick();
-        globalCheckSum = calculate_mandelbrot_fixed_point_arithmetic(dim, dim, MAX_ITER);
+        globalCheckSum = calculate_mandelbrot_double(dim, dim, MAX_ITER);
         globalEndTime = HAL_GetTick();
         executionTime = globalEndTime - globalStartTime;
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);

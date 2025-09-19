@@ -47,6 +47,9 @@ volatile uint64_t globalCheckSum = 0;
 volatile uint32_t globalStartTime = 0;
 volatile uint32_t globalEndTime = 0;
 volatile uint32_t executionTime = 0;
+// New variables for Task 3 metrics
+volatile uint64_t globalClockCycles = 0;
+volatile uint32_t throughput_pixels_per_sec = 0;
 static const int image_dimensions[] = {128, 160, 192, 224, 256};
 /* USER CODE END PV */
 
@@ -60,6 +63,12 @@ uint64_t calculate_mandelbrot_double(int width, int height, int max_iterations);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+// --- Manual DWT Cycle Counter Definitions ---
+#define CoreDebug_DEMCR (*(volatile uint32_t *)0xE000EDFC)
+#define DWT_CTRL (*(volatile uint32_t *)0xE0001000)
+#define DWT_CYCCNT (*(volatile uint32_t *)0xE0001004)
+#define TRCENA_Msk (1UL << 24)
+#define CYCEN_Msk (1UL << 0)
 /* USER CODE END 0 */
 
 /**
@@ -76,16 +85,33 @@ int main(void)
   {
     for (int i = 0; i < (sizeof(image_dimensions)/sizeof(image_dimensions[0])); i++)
     {
-        int dim = image_dimensions[i];
+    	int dim = image_dimensions[i];
 
-        // Fixed-point test
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-        globalStartTime = HAL_GetTick();
-        globalCheckSum = calculate_mandelbrot_double(dim, dim, MAX_ITER);
-        globalEndTime = HAL_GetTick();
-        executionTime = globalEndTime - globalStartTime;
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-        HAL_Delay(500);
+		// --- Measurement Start ---
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+		globalStartTime = HAL_GetTick();
+
+		uint32_t start_cycles = DWT_CYCCNT; // Capture start cycle count
+		globalCheckSum = calculate_mandelbrot_fixed_point_arithmetic(dim, dim, MAX_ITER);
+		uint32_t end_cycles = DWT_CYCCNT;   // Capture end cycle count
+
+		globalEndTime = HAL_GetTick();
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+		// --- Measurement End ---
+
+
+		// --- Calculations (performed outside of the timed section) ---
+		executionTime = globalEndTime - globalStartTime;
+		globalClockCycles = end_cycles - start_cycles;
+
+		if (executionTime > 0) {
+			uint64_t total_pixels = (uint64_t)dim * dim;
+			throughput_pixels_per_sec = (uint32_t)((total_pixels * 1000) / executionTime);
+		} else {
+			throughput_pixels_per_sec = 0;
+		}
+
+		HAL_Delay(500); // Your original delay is unchanged
 
 //        // Double-precision test
 //        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
